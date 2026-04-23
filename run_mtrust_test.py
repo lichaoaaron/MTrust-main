@@ -35,7 +35,7 @@ sys.stdout = Tee(sys.stdout, log_file)
 # 原有代码（完全不动）
 # ================================
 
-THRESHOLDS = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65]
+THRESHOLDS = [0.5]  #[round(x * 0.01, 2) for x in range(20, 56)]  # 0.20 ~ 0.55 at 0.01 steps
 
 pipeline = MTrustPipeline(spec_root="mtrust/specs")
 
@@ -52,6 +52,9 @@ SCORE_MAP = {
 }
 
 os.makedirs("output", exist_ok=True)
+
+# 磁盘缓存路径，避免重复调用 LLM
+LLM_CACHE_PATH = "output/llm_cache.json"
 
 
 def calc_score(risks, pred_conf=None, threshold=0.4):
@@ -72,56 +75,84 @@ def calc_score(risks, pred_conf=None, threshold=0.4):
     return max(score, 0)
 
 
-# ── Step1：LLM只跑一次 ─────────────────────────────
-print("\n" + "=" * 60)
-print("  正在调用 LLM...")
-print("=" * 60)
+# ── Step1：LLM只跑一次（带磁盘缓存）─────────────────────────────
+if os.path.exists(LLM_CACHE_PATH):
+    print(f"\n✅ 检测到缓存文件 {LLM_CACHE_PATH}，跳过 LLM 调用，直接读取缓存。")
+    with open(LLM_CACHE_PATH, "r", encoding="utf-8") as f:
+        llm_cache = json.load(f)
+    print(f"  缓存加载完毕，共 {len(llm_cache)} 个工单。")
+else:
+    print("\n" + "=" * 60)
+    print("  正在调用 LLM...")
+    print("=" * 60)
 
-llm_cache = []
+    llm_cache = []
 
-for case_idx, c in enumerate(cases):
-    content = c.get("content", "")
-    risks = c.get("risks", [])
-    meta = c.get("meta", {})
-    error_type = meta.get("error_type", "none")
+    for case_idx, c in enumerate(cases):
+        content = c.get("content", "")
+        risks = c.get("risks", [])
+        meta = c.get("meta", {})
+        error_type = meta.get("error_type", "none")
 
-    case_risks = []
+        case_risks = []
 
-    for risk in risks:
-        if risk.get("risk_level") not in EVAL_LEVELS:
-            continue
+        for risk in risks:
+            if risk.get("risk_level") not in EVAL_LEVELS:
+                continue
 
-        ticket = {
-            "content": content,
-            "risk_message": risk.get("risk_message", ""),
-            "rules": rules,
-        }
+            ticket = {
+                "content": content,
+                "risk_message": risk.get("risk_message", ""),
+                "rules": rules,
+            }
 
-        result = pipeline.run(ticket, task=TASK_NAME)
-        confidence = result.get("confidence", 0.0)
-        detail = result.get("detail", {})
+            result = pipeline.run(ticket, task=TASK_NAME)
+            confidence = result.get("confidence", 0.0)
+            detail = result.get("detail", {})
+            reason = detail.get("reason", "")
 
-        print(f"  Case {case_idx:3d} | {risk['risk_id']} | conf={confidence:.3f} | level={result.get('confidence_level','')} | detail_keys={list(detail.keys())[:3]}")
+            print(f"  Case {case_idx:3d} | {risk['risk_id']} | conf={confidence:.3f} | level={result.get('confidence_level','')} | detail_keys={list(detail.keys())[:3]}")
 
-        case_risks.append({
-            "risk_id": risk["risk_id"],
-            "risk_level": risk["risk_level"],
-            "label": risk.get("label", "correct"),
-            "confidence": round(confidence, 4),
+            case_risks.append({
+                "risk_id": risk["risk_id"],
+                "risk_level": risk["risk_level"],
+                "label": risk.get("label", "correct"),
+                "confidence": round(confidence, 4),
+                "reason": reason,
+            })
+
+        llm_cache.append({
+            "case_idx": case_idx,
+            "error_type": error_type,
+            "risks": case_risks,
+            "all_risks": risks,
         })
 
-    llm_cache.append({
-        "case_idx": case_idx,
-        "error_type": error_type,
-        "risks": case_risks,
-        "all_risks": risks,
-    })
-
-print(f"\n  LLM 调用完毕，共处理 {len(cases)} 个工单。")
+    with open(LLM_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(llm_cache, f, ensure_ascii=False, indent=2)
+    print(f"\n  LLM 调用完毕，共处理 {len(cases)} 个工单。已缓存到 {LLM_CACHE_PATH}")
 
 
-# ── Step2：多阈值评估（仅新增一段append）──────────
+# ── Step2：多阈值评估（细粒度 + 类感知阈值）──────────
 MARGIN = 0.05
+
+# 类感知阈值偏移：D类（主观语义推断）本身误判率高，用更高阈值拦截
+# 其他类别（A/B/C/E）保持 BASE_TH
+CLASS_TH_OFFSET = {
+    "D": 0.10,   # D类额外+0.10（更激进拦截）
+}
+
+def _infer_risk_class(reason: str) -> str:
+    """从 reason 字段首个类型标记推断 A/B/C/D/E 类。"""
+    if not reason:
+        return "?"
+    for cls in ("A", "B", "C", "D", "E"):
+        if reason.strip().startswith(cls + "类"):
+            return cls
+    # fallback: 搜索全文
+    import re
+    m = re.search(r'\b([ABCDE])类', reason)
+    return m.group(1) if m else "?"
 
 comparison_rows = []
 
@@ -166,23 +197,16 @@ for TH in THRESHOLDS:
             rid        = rd["risk_id"]
             label      = rd["label"]
             confidence = rd["confidence"]
+            reason     = rd.get("reason", "")
+
+            # 类感知阈值
+            risk_class = _infer_risk_class(reason)
+            effective_th = BASE_TH + CLASS_TH_OFFSET.get(risk_class, 0.0)
 
             if distribution_collapsed:
                 intercepted = confidence < BASE_TH
             else:
-                # if confidence < BASE_TH:
-                #     intercepted = True
-                # elif confidence > BASE_TH + MARGIN:
-                #     intercepted = False
-                # else:
-                #     intercepted = False
-
-                # if confidence > BASE_TH:
-                #     intercepted = False
-                if confidence < BASE_TH:
-                    intercepted = True
-                else:
-                    intercepted = False
+                intercepted = confidence < effective_th
 
 
             pred_conf[rid] = confidence
@@ -201,7 +225,31 @@ for TH in THRESHOLDS:
                     kept_correct += 1
 
         orig_score   = calc_score(all_risks)
-        mtrust_score = calc_score(all_risks, pred_conf, BASE_TH)
+        # calc_score uses a single threshold, so we approximate with BASE_TH;
+        # the per-risk intercept decisions are already in pred_conf comparison above.
+        # To correctly reflect class-aware decisions, re-score using intercepted flag:
+        mtrust_score = 100
+        for rd in case_risks:
+            rid   = rd["risk_id"]
+            label = rd["label"]
+            reason = rd.get("reason", "")
+            risk_class = _infer_risk_class(reason)
+            effective_th = BASE_TH + CLASS_TH_OFFSET.get(risk_class, 0.0)
+            conf = rd["confidence"]
+            level = rd["risk_level"]
+            if distribution_collapsed:
+                was_intercepted = conf < BASE_TH
+            else:
+                was_intercepted = conf < effective_th
+            if label == "incorrect" and not was_intercepted:
+                mtrust_score -= SCORE_MAP.get(level, 0)
+        # also subtract for all_risks not in case_risks (not in EVAL_LEVELS, use orig deduct)
+        evaluated_ids = {rd["risk_id"] for rd in case_risks}
+        for r in all_risks:
+            if r["risk_id"] not in evaluated_ids:
+                if r.get("label", "correct") == "incorrect":
+                    mtrust_score -= SCORE_MAP.get(r.get("risk_level", "LOW"), 0)
+        mtrust_score = max(mtrust_score, 0)
 
         original_scores.append(orig_score)
         mtrust_scores.append(mtrust_score)
@@ -217,7 +265,7 @@ for TH in THRESHOLDS:
     correct_avg   = sum(conf_correct)   / len(conf_correct)   if conf_correct   else 0
 
     print("\n" + "─" * 60)
-    print(f"  THRESHOLD = {TH:.2f}  汇总")
+    print(f"  THRESHOLD = {TH:.2f}  汇总（类感知阈值：D类+{CLASS_TH_OFFSET.get('D',0):.2f}）")
     print("─" * 60)
     print(f"  BASE_TH   : {BASE_TH:.2f}")
     print(f"  MARGIN    : {MARGIN:.2f}")

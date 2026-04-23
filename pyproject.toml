@@ -1,0 +1,21 @@
+[project]
+name = "mtrust"
+version = "0.1.0"
+description = "MTrust Confidence Evaluation Service"
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic>=2.0",
+    "python-dotenv",
+    "requests",
+    "pyyaml",
+    "openai"
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest"
+]

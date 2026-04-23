@@ -1,0 +1,21 @@
+pipeline:
+
+  - step: build_context
+
+  - step: parse_risk
+
+  - step: compute_confidence
+
+  - step: detect_signals
+
+  - step: trigger_decision
+
+  - step: conditional_branch
+    if: triggered == true
+    then:
+      - step: deepeval_evaluate
+      - step: correct_result
+    else:
+      - step: return_original
+
+  - step: output_result

@@ -1,0 +1,21 @@
+context:
+
+  input:
+    ticket_id: str
+    content: str
+
+  model_output:
+    risk_level: str        # high / mid / low / none
+    rules_hit: list
+
+  derived:
+    confidence: float
+    signals:
+      score: float
+
+    triggered: bool
+
+  final_output:
+    risk_level: str
+    confidence: float
+    corrected: bool

@@ -1,0 +1,15 @@
+version: v1
+
+rules:
+
+  - name: high_mid_low_conf
+    condition: "risk_level in ['high','mid'] and confidence < 0.7"
+
+  - name: high_value_rule
+    condition: "'high_value' in rule_tags"
+
+  - name: suspicious_no_risk
+    condition: "risk_level == 'none' and signals.score > 0.6"
+
+decision:
+  strategy: any_true

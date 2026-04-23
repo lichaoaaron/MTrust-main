@@ -1,0 +1,26 @@
+# ── Calibration method ───────────────────────────────────────────────────────
+# weighted_average : blend model confidence with evidence-strength score (default)
+# self_consistency : run LLM N times and use agreement rate (future / not yet live)
+method: weighted_average
+
+# ── Field name mapping ────────────────────────────────────────────────────────
+# Override these when a task uses different field names in its output_schema.
+# Default values match the most common convention.
+#   confidence_field: score        # use this if your task returns "score" instead of "confidence"
+#   reason_field: explanation      # use this if your task returns "explanation" instead of "reason"
+confidence_field: overall_confidence
+reason_field: reason
+
+# ── Blend weights (must sum to 1.0, auto-normalised if not) ──────────────────
+weights:
+  model_conf : 0.7   # weight of the raw LLM confidence score
+  evidence   : 0.3   # weight of the evidence-strength heuristic
+
+# ── Minimum calibrated confidence to be considered a positive signal ──────────
+# Aligns with intercepted threshold: confidence < 0.6 → intercepted = true
+threshold: 0.6
+
+# ── Self-consistency params (only used when method: self_consistency) ─────────
+self_consistency:
+  repeat_times: 3     # number of independent LLM calls
+  agreement_threshold: 0.67  # fraction of calls that must agree

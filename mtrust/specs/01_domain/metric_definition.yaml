@@ -1,0 +1,17 @@
+name: ticket_audit
+
+scoring:
+  high_risk:
+    penalty: -100
+    stop_on_hit: true
+
+  mid_risk:
+    penalty: -100
+    stop_on_hit: true
+
+  low_risk:
+    penalty: -5
+    accumulate: true
+
+max_score: 100
+target_avg_score: 95

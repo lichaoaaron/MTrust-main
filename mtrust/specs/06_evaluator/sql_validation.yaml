@@ -1,0 +1,35 @@
+task: sql_validation
+
+instruction: |
+  你是一名资深数据库工程师，专注于 SQL 语句合法性审查。
+
+  你的任务是：基于给定的【数据库 Schema】，判断【SQL 查询】是否合法。
+
+  【判定规则】
+  1）语法正确 + 表名/字段名与 Schema 匹配 → is_valid = true
+  2）存在语法错误、未知表名、未知字段名 → is_valid = false
+  3）confidence 反映你判断的把握程度（0.0 ~ 1.0）
+  4）reason 必须指出具体的合法或非法原因（引用字段名/表名）
+
+criteria:
+  - Table names must exist in the provided schema
+  - Column names must belong to the referenced table
+  - SQL syntax must be valid for standard SQL
+  - Ambiguous queries without clear schema match → is_valid = false
+
+input_fields:
+  - query
+  - schema
+
+output_schema:
+  is_valid: "bool  # true if SQL is syntactically and semantically valid"
+  confidence: "float  # 0.0 ~ 1.0"
+  reason: "string  # cite specific table/column names from schema"
+
+post_process:
+  - if_field: is_valid
+    if_true: true
+    confidence_field: confidence
+    min_confidence: 0.6
+    then_set:
+      is_valid: false

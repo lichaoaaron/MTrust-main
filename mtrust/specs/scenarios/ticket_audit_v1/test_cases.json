@@ -1,0 +1,12 @@
+[
+  {
+    "ticket_id": "T001",
+    "content": "用户反馈登录失败，系统报错timeout",
+    "expected_risk": "high"
+  },
+  {
+    "ticket_id": "T002",
+    "content": "页面展示有轻微格式问题",
+    "expected_risk": "low"
+  }
+]

@@ -1,0 +1,136 @@
+import json
+from datetime import datetime
+from mtrust.pipeline.pipeline import MTrustPipeline
+
+pipeline = MTrustPipeline(spec_root="mtrust/specs")
+
+cases = json.load(open("data/case_one.json", "r", encoding="utf-8"))
+rules = open("data/rule.yaml", "r", encoding="utf-8").read()
+
+HIGH_CONF_THRESHOLD = 0.8
+
+TP = FP = FN = TN = 0
+system_error = 0
+
+high_conf_total = 0
+high_conf_correct = 0
+
+results_detail = []
+
+for i, c in enumerate(cases):
+    ticket = {
+        "content": c.get("content", ""),
+        "rules": rules,
+        "audit_result": c.get("audit_result", ""),
+        "error_type": c.get("error_type", "none")
+    }
+
+    result = pipeline.run(ticket)
+
+    gt_label = c.get("label")
+    pred_has_fp = result.get("has_false_positive", False)
+    confidence = result.get("confidence", 0)
+
+    print(f"\n===== Case {i} =====")
+    print("label:", gt_label,
+          "| pred_has_fp:", pred_has_fp,
+          "| conf:", round(confidence, 3),
+          "| error_type:", c.get("error_type"))
+
+    case_record = {
+        "case_id": i,
+        "label": gt_label,
+        "error_type": c.get("error_type"),
+        "pred_has_fp": pred_has_fp,
+        "confidence": confidence,
+        "reason": result.get("result", {}).get("reason", "")
+    }
+
+    if c.get("error_type") == "system_error":
+        system_error += 1
+        case_record["status"] = "skipped_system_error"
+        results_detail.append(case_record)
+        continue
+
+    gt_has_fp = (gt_label == "incorrect")
+    pred = pred_has_fp
+
+    if gt_has_fp and pred:
+        TP += 1
+        case_record["status"] = "TP"
+    elif not gt_has_fp and pred:
+        FP += 1
+        case_record["status"] = "FP"
+    elif gt_has_fp and not pred:
+        FN += 1
+        case_record["status"] = "FN"
+    else:
+        TN += 1
+        case_record["status"] = "TN"
+
+    # 高置信度统计
+    if confidence >= HIGH_CONF_THRESHOLD:
+        high_conf_total += 1
+        if (gt_has_fp and pred) or (not gt_has_fp and not pred):
+            high_conf_correct += 1
+
+    results_detail.append(case_record)
+
+# ===== 汇总输出（只输出一次）=====
+total = TP + FP + FN + TN
+
+print("\n========== 评估结果 ==========")
+print(f"TP: {TP} | FP: {FP} | FN: {FN} | TN: {TN}")
+print(f"系统异常跳过: {system_error}")
+
+summary = {
+    "TP": TP,
+    "FP": FP,
+    "FN": FN,
+    "TN": TN,
+    "system_error": system_error
+}
+
+if total > 0:
+    acc = (TP + TN) / total
+    fp_rate = FP / (FP + TN) if (FP + TN) > 0 else 0
+    fn_rate = FN / (FN + TP) if (FN + TP) > 0 else 0
+
+    print(f"准确率: {acc:.2f}")
+    print(f"误伤率: {fp_rate:.2f}")
+    print(f"漏检率: {fn_rate:.2f}")
+
+    summary.update({
+        "accuracy": round(acc, 4),
+        "fp_rate": round(fp_rate, 4),
+        "fn_rate": round(fn_rate, 4)
+    })
+
+# ===== 高置信度指标 =====
+if total > 0:
+    high_conf_ratio = high_conf_total / total
+    high_conf_acc = (high_conf_correct / high_conf_total) if high_conf_total > 0 else 0
+
+    print("\n====== 高置信度指标 ======")
+    print(f"高置信度占比: {high_conf_ratio:.2f}")
+    print(f"高置信度准确率: {high_conf_acc:.2f}")
+
+    summary.update({
+        "high_conf_ratio": round(high_conf_ratio, 4),
+        "high_conf_accuracy": round(high_conf_acc, 4)
+    })
+
+print("================================")
+
+# ===== 保存 =====
+output = {
+    "summary": summary,
+    "details": results_detail
+}
+
+filename = f"mtrust_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+with open(filename, "w", encoding="utf-8") as f:
+    json.dump(output, f, ensure_ascii=False, indent=2)
+
+print(f"\n结果已保存到: {filename}")

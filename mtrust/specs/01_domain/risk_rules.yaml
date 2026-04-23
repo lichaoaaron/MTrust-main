@@ -1,0 +1,12 @@
+high_risk:
+  - id: H1
+    desc: 数据泄露
+    tags: [high_value]
+
+mid_risk:
+  - id: M1
+    desc: 核心业务中断
+
+low_risk:
+  - id: L1
+    desc: 表述不规范

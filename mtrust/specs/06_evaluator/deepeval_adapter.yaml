@@ -1,0 +1,6 @@
+metric: GEval
+
+criteria: |
+  判断该工单是否存在高风险或中风险问题，并给出是否需要修正的结论。
+
+model: gpt-4o-mini

@@ -1,0 +1,18 @@
+name: ticket_audit_v1
+
+extends:
+  schema: ../../00_schema/runtime_schema.yaml
+  domain:
+    - ../../01_domain/risk_rules.yaml
+    - ../../01_domain/metric_definition.yaml
+  signal: ../../02_signal/signals.yaml
+  confidence: ../../03_confidence/confidence_model.yaml
+  policy: ../../04_policy/trigger_policy.yaml
+  pipeline: ../../05_pipeline/evaluator_pipeline.yaml
+  evaluator: ../../06_evaluator/deepeval_adapter.yaml
+
+overrides:
+  confidence.threshold: 0.7
+
+runtime:
+  enable_tracing: true

@@ -1,0 +1,16 @@
+signals:
+
+  - name: error_signal
+    weight: 0.4
+    patterns: ["error", "exception", "timeout"]
+
+  - name: critical_api
+    weight: 0.3
+    patterns: ["/login", "/pay"]
+
+  - name: complaint_signal
+    weight: 0.3
+    patterns: ["无法使用", "严重影响"]
+
+aggregation:
+  method: weighted_sum

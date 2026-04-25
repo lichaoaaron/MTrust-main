@@ -12,7 +12,8 @@ dependencies = [
     "python-dotenv",
     "requests",
     "pyyaml",
-    "openai"
+    "openai",
+    "streamlit>=1.50.0",
 ]
 
 [tool.uv]
